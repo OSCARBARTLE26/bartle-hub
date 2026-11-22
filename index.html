@@ -315,8 +315,9 @@ var toastTimer;
 function toast(msg){ toastEl.textContent = msg; toastEl.hidden = false; clearTimeout(toastTimer);
   toastTimer = setTimeout(function(){ toastEl.hidden = true; }, 3800); }
 function writeErr(e){
-  var msg = String((e && (e.message || e.code)) || '');
-  toast(/jwt|auth|permission|policy/i.test(msg) ? 'You have been signed out. Sign in again and try once more.' : 'That did not save. Check the Wi-Fi and try again.');
+  var msg = String((e && (e.message || e.code)) || 'unknown error');
+  lastError = msg; render();
+  toast('That did not save: ' + msg.slice(0, 140));
 }
 
 /* ---------- what the app works out ---------- */
@@ -332,7 +333,7 @@ function jobDone(j){ return j.doneWeek === weekStart(today()); }
 function jobsToday(){ var t = todayName(); return of('job').filter(function(j){ return j.day === t || !j.day || j.day === 'Any day'; }); }
 
 /* ---------- storage: one shared table in Supabase, cached on the device so it opens instantly ---------- */
-var sb = null, CFG = window.HUB_CONFIG || {}, live = null;
+var sb = null, CFG = window.HUB_CONFIG || {}, live = null, lastError = '';
 function lsSave(){ try { localStorage.setItem(LS, JSON.stringify({items:items, settings:settings, meals:meals})); } catch(e){} }
 function newId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function applyRow(id, data){
@@ -367,11 +368,11 @@ function saveMeta(name, data){ return put('meta-' + name, data); }
 function loadAll(){
   if (!sb) return Promise.resolve();
   return sb.from('hub_items').select('id,data').then(function(r){
-    if (r.error) { if (mode !== 'shared') mode = 'lost'; stale = true; render(); return; }
+    if (r.error) { lastError = r.error.message || String(r.error.code || 'unknown error'); if (mode !== 'shared') mode = 'lost'; stale = true; render(); return; }
     items = []; settings = Object.assign({}, DEF); meals = {};
     (r.data || []).forEach(function(x){ applyRow(x.id, x.data); });
-    mode = 'shared'; stale = false; lsSave(); render();
-  }, function(){ stale = true; render(); });
+    mode = 'shared'; stale = false; lastError = ''; lsSave(); render();
+  }, function(e){ lastError = String((e && e.message) || 'no connection'); stale = true; render(); });
 }
 function startLive(){
   if (live) return;
@@ -427,7 +428,8 @@ function jobTick(j){
 function banner(){
   var out = '';
   if (mode === 'lost') out += '<div class="banner card">Can\'t reach the hub right now. Showing what was saved on this device. Check the Wi-Fi.</div>';
-  if (stale) out += '<div class="banner card">Not updated for a while. What you see may be out of date.</div>';
+  if (lastError) out += '<div class="banner card" role="alert">Not syncing with the other devices. Reason: ' + esc(lastError.slice(0, 160)) + '</div>';
+  else if (stale) out += '<div class="banner card">Not updated for a while. What you see may be out of date.</div>';
   return out;
 }
 
